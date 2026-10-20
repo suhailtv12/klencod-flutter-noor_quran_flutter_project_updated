@@ -1,0 +1,76 @@
+name: Build Noor Quran APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # Re-create Android platform files using the current Flutter embedding v2.
+      # This avoids stale Android v1 embedding files in older repositories.
+      - name: Generate fresh Android platform
+        run: |
+          rm -rf android
+          flutter create --platforms=android --project-name noor_quran --org com.noorquran .
+
+      - name: Configure audio service activity and manifest
+        run: |
+          mkdir -p android/app/src/main/kotlin/com/noorquran/noor_quran
+          cat > android/app/src/main/kotlin/com/noorquran/noor_quran/MainActivity.kt <<'KOTLIN'
+          package com.noorquran.noor_quran
+          import com.ryanheise.audioservice.AudioServiceActivity
+          class MainActivity : AudioServiceActivity()
+          KOTLIN
+          cat > android/app/src/main/AndroidManifest.xml <<'MANIFEST'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <application android:label="نور القرآن" android:name="${applicationName}" android:icon="@mipmap/ic_launcher">
+                  <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:theme="@style/LaunchTheme" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode" android:hardwareAccelerated="true" android:windowSoftInputMode="adjustResize">
+                      <meta-data android:name="io.flutter.embedding.android.NormalTheme" android:resource="@style/NormalTheme" />
+                      <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+                  </activity>
+                  <service android:name="com.ryanheise.audioservice.AudioService" android:foregroundServiceType="mediaPlayback" android:exported="true" tools:ignore="Instantiatable">
+                      <intent-filter><action android:name="android.media.browse.MediaBrowserService" /></intent-filter>
+                  </service>
+                  <receiver android:name="com.ryanheise.audioservice.MediaButtonReceiver" android:exported="true">
+                      <intent-filter><action android:name="android.intent.action.MEDIA_BUTTON" /></intent-filter>
+                  </receiver>
+                  <meta-data android:name="flutterEmbedding" android:value="2" />
+              </application>
+          </manifest>
+          MANIFEST
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Check Dart source
+        run: flutter analyze --no-pub
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: noor-quran-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
